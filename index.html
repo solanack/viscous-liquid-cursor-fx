@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enhanced Viscous Liquid - Cursor FX</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #canvas-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+    #controls {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 20px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      min-width: 220px;
+      z-index: 10;
+      transition: transform 0.3s ease;
+    }
+    #controls label {
+      display: block;
+      margin: 10px 0 5px;
+      font-size: 14px;
+    }
+    #controls input[type="range"] {
+      width: 100%;
+    }
+    #controls button {
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #info {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      color: rgba(255,255,255,0.7);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="controls">
+    <h3>Viscous Liquid Controls</h3>
+    <label>Viscosity: <span id="visc-val">0.8</span></label>
+    <input type="range" id="viscosity" min="0.1" max="2.0" step="0.1" value="0.8">
+    <label>Flow Speed: <span id="speed-val">0.5</span></label>
+    <input type="range" id="speed" min="0.1" max="2.0" step="0.1" value="0.5">
+    <label>Cursor Strength: <span id="strength-val">1.2</span></label>
+    <input type="range" id="strength" min="0.2" max="3.0" step="0.1" value="1.2">
+    <label>Color Scheme</label>
+    <select id="colors">
+      <option value="neon">Neon Blue-Purple</option>
+      <option value="gold">Gold Liquid</option>
+      <option value="cyber">Cyber Green</option>
+    </select>
+    <button id="reset">Reset</button>
+  </div>
+  <div id="info">Enhanced Viscous Liquid Cursor FX • Based on sabosugi Three.js shaders • Move mouse to interact</div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // Enhanced Viscous Liquid - Cursor FX
+    // Reverse-engineered and expanded from typical sabosugi fluid/shader pens
+    // Features added: adjustable params, color schemes, stronger cursor influence, trail persistence
+
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const uniforms = {
+      uTime: { value: 0 },
+      uMouse: { value: new THREE.Vector2(0.5, 0.5) },
+      uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      uViscosity: { value: 0.8 },
+      uSpeed: { value: 0.5 },
+      uStrength: { value: 1.2 },
+      uColor1: { value: new THREE.Color(0x00ffff) },
+      uColor2: { value: new THREE.Color(0xff00ff) },
+      uColor3: { value: new THREE.Color(0x0044ff) }
+    };
+
+    const vertexShader = `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      uniform float uTime;
+      uniform vec2 uMouse;
+      uniform vec2 uResolution;
+      uniform float uViscosity;
+      uniform float uSpeed;
+      uniform float uStrength;
+      uniform vec3 uColor1;
+      uniform vec3 uColor2;
+      uniform vec3 uColor3;
+      varying vec2 vUv;
+
+      // Simple noise
+      float noise(vec2 p) {
+        return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+      }
+
+      float fbm(vec2 p) {
+        float f = 0.0;
+        float amp = 0.5;
+        for (int i = 0; i < 5; i++) {
+          f += amp * noise(p);
+          p *= 2.0;
+          amp *= 0.5;
+        }
+        return f;
+      }
+
+      void main() {
+        vec2 uv = vUv;
+        vec2 mouse = uMouse;
+        float dist = length(uv - mouse);
+        
+        // Viscous flow influence
+        float influence = smoothstep(0.4, 0.0, dist) * uStrength;
+        vec2 flow = (mouse - uv) * influence * uViscosity;
+        
+        // Time-based liquid motion
+        vec2 p = uv * 3.0 + flow + vec2(uTime * uSpeed * 0.2);
+        float n = fbm(p);
+        n += fbm(p * 2.0 + vec2(uTime * 0.1)) * 0.5;
+        
+        // Color mixing based on noise and distance
+        vec3 color = mix(uColor1, uColor2, n);
+        color = mix(color, uColor3, smoothstep(0.3, 0.7, n));
+        color *= 1.0 + influence * 0.5;
+        
+        // Soft edges and liquid feel
+        float alpha = smoothstep(0.0, 0.1, n) * 0.9;
+        gl_FragColor = vec4(color, alpha);
+      }
+    `;
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms,
+      transparent: true
+    });
+
+    const geometry = new THREE.PlaneGeometry(2, 2);
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+
+    // Mouse tracking with smoothing
+    let targetMouse = new THREE.Vector2(0.5, 0.5);
+    window.addEventListener('mousemove', (e) => {
+      targetMouse.x = e.clientX / window.innerWidth;
+      targetMouse.y = 1.0 - e.clientY / window.innerHeight;
+    });
+
+    // Controls
+    const viscSlider = document.getElementById('viscosity');
+    const speedSlider = document.getElementById('speed');
+    const strengthSlider = document.getElementById('strength');
+    const colorSelect = document.getElementById('colors');
+
+    function updateColors(scheme) {
+      if (scheme === 'neon') {
+        uniforms.uColor1.value.set(0x00ffff);
+        uniforms.uColor2.value.set(0xff00ff);
+        uniforms.uColor3.value.set(0x0044ff);
+      } else if (scheme === 'gold') {
+        uniforms.uColor1.value.set(0xffd700);
+        uniforms.uColor2.value.set(0xffa500);
+        uniforms.uColor3.value.set(0x8b4513);
+      } else if (scheme === 'cyber') {
+        uniforms.uColor1.value.set(0x00ff00);
+        uniforms.uColor2.value.set(0x00ffaa);
+        uniforms.uColor3.value.set(0x003300);
+      }
+    }
+
+    viscSlider.addEventListener('input', (e) => {
+      uniforms.uViscosity.value = parseFloat(e.target.value);
+      document.getElementById('visc-val').textContent = e.target.value;
+    });
+    speedSlider.addEventListener('input', (e) => {
+      uniforms.uSpeed.value = parseFloat(e.target.value);
+      document.getElementById('speed-val').textContent = e.target.value;
+    });
+    strengthSlider.addEventListener('input', (e) => {
+      uniforms.uStrength.value = parseFloat(e.target.value);
+      document.getElementById('strength-val').textContent = e.target.value;
+    });
+    colorSelect.addEventListener('change', (e) => updateColors(e.target.value));
+    document.getElementById('reset').addEventListener('click', () => {
+      viscSlider.value = 0.8;
+      speedSlider.value = 0.5;
+      strengthSlider.value = 1.2;
+      colorSelect.value = 'neon';
+      uniforms.uViscosity.value = 0.8;
+      uniforms.uSpeed.value = 0.5;
+      uniforms.uStrength.value = 1.2;
+      updateColors('neon');
+      document.getElementById('visc-val').textContent = '0.8';
+      document.getElementById('speed-val').textContent = '0.5';
+      document.getElementById('strength-val').textContent = '1.2';
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      uniforms.uTime.value += 0.016;
+      // Smooth mouse follow for viscous feel
+      uniforms.uMouse.value.lerp(targetMouse, 0.1);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
